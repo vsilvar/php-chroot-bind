@@ -1,15 +1,18 @@
 #!/bin/bash
-_CHROOTS_CMD="ls -1d /home/www/*/chroot"
+_CHROOTS_CMD="ls -1d /var/www/*/chroot"
 _SYSTEMD_UNIT_DIR="/etc/systemd/system"
 _BIND="\
-	/usr/share/zoneinfo \
-	/dev/urandom \
-	/dev/zero \
-	/dev/null \
-	/etc/resolv.conf \
-	/lib/x86_64-linux-gnu/libnss_dns.so.2 \
-	/usr/share/ca-certificates \
-	/etc/ssl/certs"
+	rw:/tmp \
+	rw:/var/lib/php/sessions
+	ro:/usr/share/zoneinfo \
+	ro:/dev/urandom \
+	ro:/dev/zero \
+	ro:/dev/null \
+	ro:/etc/resolv.conf \
+	ro:/lib/x86_64-linux-gnu/libnss_dns.so.2 \
+	ro:/usr/share/ca-certificates \
+	ro:/usr/lib/ssl/certs \
+	ro:/etc/ssl/certs"
 
 # File with additional binds for specific chroots. Relative to the chroot.
 _BIND_LOCAL="../bind.conf"
@@ -70,6 +73,9 @@ create_systemd_units() {
 		END
 
 		for bind in `get_binds "${chroot}"`; do
+			IFS=':'; arrBind=($bind); unset IFS;
+			options=${arrBind[0]}
+			bind=${arrBind[1]}
 			eBind="`systemd-escape -p \"${bind}\"`"
 			mountpoint="`systemd-escape -p \"${chroot}${bind}\"`"
 
@@ -87,7 +93,7 @@ create_systemd_units() {
 			What=${bind}
 			Where=${chroot}${bind}
 			Type=none
-			Options=bind
+			Options=bind,${options}
 			END
 
 			[ ! -f "${_SYSTEMD_UNIT_DIR}/php-chroot-create-mountpoint-file-${eBind}@.service" ] && \
@@ -254,7 +260,10 @@ EOF
 $_CHROOTS_CMD | while read chroot; do
 	echo "Chroot: $chroot"
 	for bind in `get_binds "${chroot}"`; do
-		
+		IFS=':'; arrBind=($bind); unset IFS;
+		options=${arrBind[0]}
+		bind=${arrBind[1]}
+
 		mountpoint="${chroot}${bind}"
 
 		# List binds
@@ -269,7 +278,7 @@ $_CHROOTS_CMD | while read chroot; do
 			# Create mountpoint (could be directory or file)
 			[ -d "${bind}" ] && mkdir -p "${mountpoint}" || mkdir -p "${chroot}`dirname ${bind}`" && touch "${mountpoint}"
 			# Mount bind read-only
-			echo -en "\t  "  && mount -v -o "bind,ro" "${bind}" "${mountpoint}"
+			echo -en "\t  "  && mount -v -o "bind,${options}" "${bind}" "${mountpoint}"
 			continue
 		fi
 
@@ -278,5 +287,5 @@ $_CHROOTS_CMD | while read chroot; do
 
 	done;
 	# Clean up directories and files created as mountpoint
-	[ "$_OPT_ACTION" = "unbind" ] && $_OPT_CLEAN && for bind in `get_binds "${chroot}"`; do delete_path "${chroot}" "${bind}"; done;
+	[ "$_OPT_ACTION" = "unbind" ] && $_OPT_CLEAN && for bind in `get_binds "${chroot}"`; do IFS=':'; arrBind=($bind); unset IFS; delete_path "${chroot}" "${arrBind[1]}"; done;
 done;
